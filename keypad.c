@@ -19,22 +19,24 @@
 #define KEY_OUT_2 15
 
 #define KEY_IN \
-    1 << KEY_IN_0 | \
-    1 << KEY_IN_1 | \
-    1 << KEY_IN_2 | \
-    1 << KEY_IN_3
+    1ul << KEY_IN_0 | \
+    1ul << KEY_IN_1 | \
+    1ul << KEY_IN_2 | \
+    1ul << KEY_IN_3
 
 #define KEY_OUT \
-    1 << KEY_OUT_0 | \
-    1 << KEY_OUT_1 | \
-    1 << KEY_OUT_2
+    1ul << KEY_OUT_0 | \
+    1ul << KEY_OUT_1 | \
+    1ul << KEY_OUT_2
 
 struct keypad_state
 {
-    size_t row;
-    size_t col;
+    uint8_t row;
+    uint8_t col;
     bool pressed;
 };
+
+static struct keypad_state keypad_state = { .pressed = false };
 
 static char const keys[4][3] = {
     '1', '2', '3',
@@ -43,62 +45,41 @@ static char const keys[4][3] = {
     '+', '0', '-'
 };
 
-static struct keypad_state keypad_state;
-
 #define time_off() sleep_ms(1)
 #define time_on() sleep_ms(1)
 
-bool keypad_in(size_t const out, size_t *in)
-{
-    // printf("col %d\n", out);
-    if (!gpio_get(KEY_IN_0))
-        *in = 3;
-    else if (!gpio_get(KEY_IN_1))
-        *in = 2;
-    else if (!gpio_get(KEY_IN_2))
-        *in = 1;
-    else if (!gpio_get(KEY_IN_3))
-        *in = 0;
-    else
-        return false;
-
-    // printf("row %d\n", *in);
-    printf("%c\n", keys[*in][out]);
-    return true;
-}
+static uint8_t columne;
 
 void keypad_task()
 {
-    size_t row;
-    size_t col;
-    bool pressed;
-
     time_off();
+    columne = 2;
     gpio_put(KEY_OUT_0, 0);
     time_on();
-    col = 2;
-    pressed = keypad_in(col, &row);
     gpio_put(KEY_OUT_0, 1);
-    if (pressed)
-        return;
 
     time_off();
+    columne = 1;
     gpio_put(KEY_OUT_1, 0);
     time_on();
-    col = 1;
-    pressed = keypad_in(col, &row);
     gpio_put(KEY_OUT_1, 1);
-    if (pressed)
-        return;
 
     time_off();
+    columne = 0;
     gpio_put(KEY_OUT_2, 0);
     time_on();
-    col = 0;
-    pressed = keypad_in(col, &row);
     gpio_put(KEY_OUT_2, 1);
-    if (pressed)
-        return;
+}
+
+void keypad_event(uint gpio, uint32_t events)
+{
+    keypad_state.col = columne;
+    keypad_state.row = gpio == KEY_IN_0 ? 3 :
+                       gpio == KEY_IN_1 ? 2 :
+                       gpio == KEY_IN_2 ? 1 :
+                       gpio == KEY_IN_3 ? 0 : 0xff;
+    assert(keypad_state.row != 0xff);
+    keypad_state.pressed = true;
 }
 
 int main()
@@ -127,6 +108,11 @@ int main()
     gpio_pull_up(KEY_IN_2);
     gpio_pull_up(KEY_IN_3);
 
+    gpio_set_irq_enabled_with_callback(KEY_IN_0, GPIO_IRQ_EDGE_FALL, true, &keypad_event);
+    gpio_set_irq_enabled(KEY_IN_1, GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(KEY_IN_2, GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(KEY_IN_3, GPIO_IRQ_EDGE_FALL, true);
+
     gpio_init(KEY_OUT_0);
     gpio_init(KEY_OUT_1);
     gpio_init(KEY_OUT_2);
@@ -142,6 +128,11 @@ int main()
     while (1)
     {
         keypad_task();
+        if (keypad_state.pressed)
+        {
+            keypad_state.pressed = false;
+            printf("%c row: %d col: %d\n", keys[keypad_state.row][keypad_state.col], keypad_state.row, keypad_state.col);
+        }
     }
 
     return 0;
