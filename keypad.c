@@ -10,130 +10,179 @@
 #define I2C_SCL 5
 
 // Keypad defines
+#define KEY_IN_SIZE 4
 #define KEY_IN_0 9
 #define KEY_IN_1 10
 #define KEY_IN_2 11
 #define KEY_IN_3 12
+#define KEY_OUT_SIZE 3
 #define KEY_OUT_0 13
 #define KEY_OUT_1 14
 #define KEY_OUT_2 15
 
 #define KEY_IN \
-    1ul << KEY_IN_0 | \
-    1ul << KEY_IN_1 | \
-    1ul << KEY_IN_2 | \
-    1ul << KEY_IN_3
+	((1ul << KEY_IN_0) | \
+	 (1ul << KEY_IN_1) | \
+	 (1ul << KEY_IN_2) | \
+	 (1ul << KEY_IN_3))
 
 #define KEY_OUT \
-    1ul << KEY_OUT_0 | \
-    1ul << KEY_OUT_1 | \
-    1ul << KEY_OUT_2
+	((1ul << KEY_OUT_0) | \
+	 (1ul << KEY_OUT_1) | \
+	 (1ul << KEY_OUT_2))
 
-struct keypad_state
+static uint32_t const key_in[KEY_IN_SIZE] = { KEY_IN_3, KEY_IN_2, KEY_IN_1, KEY_IN_0 };
+static uint32_t const key_out[KEY_OUT_SIZE] = { KEY_OUT_2, KEY_OUT_1, KEY_OUT_0 };
+
+static char const keys[KEY_IN_SIZE][KEY_OUT_SIZE] = {
+	'1', '2', '3',
+	'4', '5', '6',
+	'7', '8', '9',
+	'+', '0', '-'
+};
+
+static char const keys_alt[KEY_IN_SIZE][KEY_OUT_SIZE] = {
+	'a', '\t', '\b',
+	'd', '\v', '\a',
+	'g', '\0', '\f',
+	'=', '\r', '\n'
+};
+
+static uint32_t input_state_data[2][KEY_OUT_SIZE];
+static bool input_state_swapped;
+static uint32_t *input_state;
+static uint32_t *input_state_previous;
+static bool alt_key_printable;
+
+#define ALT_COL 0
+#define ALT_ROW 3
+
+bool alt_held()
 {
-    uint8_t row;
-    uint8_t col;
-    bool pressed;
-};
+	return input_state[0] & (1ul << key_in[3]);
+}
 
-static struct keypad_state keypad_state = { .pressed = false };
+bool is_alt_key(size_t row, size_t col)
+{
+	return row == ALT_ROW && col == ALT_COL;
+}
 
-static char const keys[4][3] = {
-    '1', '2', '3',
-    '4', '5', '6',
-    '7', '8', '9',
-    '+', '0', '-'
-};
 
 #define time_off() sleep_ms(1)
 #define time_on() sleep_ms(1)
 
-static uint8_t columne;
+bool keypad_process(uint32_t input, size_t col)
+{
+	for (size_t row = 0; row < KEY_IN_SIZE; ++row)
+	{
+		uint32_t mask = 1ul << key_in[row];
+
+		// Event Pressed
+		if (~input_state[col] & input & mask)
+		{
+			// Alt key
+			if (is_alt_key(row, col))
+			{
+				alt_key_printable = true;
+				continue;
+			}
+
+			// Is alt key currently held
+			if (alt_held(input_state))
+			{
+				alt_key_printable = false;
+				putchar(keys_alt[row][col]);
+			}
+			else
+				putchar(keys[row][col]);
+		}
+
+		// Event Release Key
+		else if (input_state[col] & ~input & mask)
+		{
+			// If alt is released
+			if (is_alt_key(row, col))
+			{
+				if (alt_key_printable)
+					putchar(keys[row][col]);
+			}
+		}
+	}
+}
+
 
 void keypad_task()
 {
-    time_off();
-    columne = 2;
-    gpio_put(KEY_OUT_0, 0);
-    time_on();
-    gpio_put(KEY_OUT_0, 1);
+	bool cycle_input_state = false;
+	for (size_t col = 0; col < KEY_OUT_SIZE; ++col)
+	{
+		time_off();
+		gpio_put(key_out[col], 0);
+		time_on();
 
-    time_off();
-    columne = 1;
-    gpio_put(KEY_OUT_1, 0);
-    time_on();
-    gpio_put(KEY_OUT_1, 1);
+		uint32_t keypad_in_state = ~gpio_get_all() & KEY_IN;
+		if (input_state[col] != keypad_in_state)
+		{
+			cycle_input_state = true;
+			keypad_process(keypad_in_state, col);
+			input_state[col] = keypad_in_state;
+		}
 
-    time_off();
-    columne = 0;
-    gpio_put(KEY_OUT_2, 0);
-    time_on();
-    gpio_put(KEY_OUT_2, 1);
+		gpio_put(key_out[col], 1);
+	}
 }
 
-void keypad_event(uint gpio, uint32_t events)
-{
-    keypad_state.col = columne;
-    keypad_state.row = gpio == KEY_IN_0 ? 3 :
-                       gpio == KEY_IN_1 ? 2 :
-                       gpio == KEY_IN_2 ? 1 :
-                       gpio == KEY_IN_3 ? 0 : 0xff;
-    assert(keypad_state.row != 0xff);
-    keypad_state.pressed = true;
-}
 
 int main()
 {
-    stdio_init_all();
+	stdio_init_all();
 
-    // I2C Initialisation. Using it at 400Khz.
-    i2c_init(I2C_PORT, 400*1000);
-    
-    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(I2C_SDA);
-    gpio_pull_up(I2C_SCL);
+	// I2C Initialisation. Using it at 400Khz.
+	i2c_init(I2C_PORT, 400*1000);
 
-    // Keypad GPIO
-    gpio_init(KEY_IN_0);
-    gpio_init(KEY_IN_1);
-    gpio_init(KEY_IN_2);
-    gpio_init(KEY_IN_3);
-    gpio_set_dir(KEY_IN_0, GPIO_IN);
-    gpio_set_dir(KEY_IN_1, GPIO_IN);
-    gpio_set_dir(KEY_IN_2, GPIO_IN);
-    gpio_set_dir(KEY_IN_3, GPIO_IN);
-    gpio_pull_up(KEY_IN_0);
-    gpio_pull_up(KEY_IN_1);
-    gpio_pull_up(KEY_IN_2);
-    gpio_pull_up(KEY_IN_3);
+	gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+	gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+	gpio_pull_up(I2C_SDA);
+	gpio_pull_up(I2C_SCL);
 
-    gpio_set_irq_enabled_with_callback(KEY_IN_0, GPIO_IRQ_EDGE_FALL, true, &keypad_event);
-    gpio_set_irq_enabled(KEY_IN_1, GPIO_IRQ_EDGE_FALL, true);
-    gpio_set_irq_enabled(KEY_IN_2, GPIO_IRQ_EDGE_FALL, true);
-    gpio_set_irq_enabled(KEY_IN_3, GPIO_IRQ_EDGE_FALL, true);
+	// Keypad GPIO
+	gpio_init(KEY_IN_0);
+	gpio_init(KEY_IN_1);
+	gpio_init(KEY_IN_2);
+	gpio_init(KEY_IN_3);
+	gpio_set_dir(KEY_IN_0, GPIO_IN);
+	gpio_set_dir(KEY_IN_1, GPIO_IN);
+	gpio_set_dir(KEY_IN_2, GPIO_IN);
+	gpio_set_dir(KEY_IN_3, GPIO_IN);
+	gpio_pull_up(KEY_IN_0);
+	gpio_pull_up(KEY_IN_1);
+	gpio_pull_up(KEY_IN_2);
+	gpio_pull_up(KEY_IN_3);
 
-    gpio_init(KEY_OUT_0);
-    gpio_init(KEY_OUT_1);
-    gpio_init(KEY_OUT_2);
-    gpio_set_dir(KEY_OUT_0, GPIO_OUT);
-    gpio_set_dir(KEY_OUT_1, GPIO_OUT);
-    gpio_set_dir(KEY_OUT_2, GPIO_OUT);
-    gpio_put(KEY_OUT_0, 1);
-    gpio_put(KEY_OUT_1, 1);
-    gpio_put(KEY_OUT_2, 1);
+	// Configure GPIO IRQ
+	// gpio_set_irq_enabled_with_callback(KEY_IN_0, GPIO_IRQ_EDGE_FALL, true, &keypad_event);
+	// gpio_set_irq_enabled(KEY_IN_1, GPIO_IRQ_EDGE_FALL, true);
+	// gpio_set_irq_enabled(KEY_IN_2, GPIO_IRQ_EDGE_FALL, true);
+	// gpio_set_irq_enabled(KEY_IN_3, GPIO_IRQ_EDGE_FALL, true);
 
-    puts("Hello, world!");
+	gpio_init(KEY_OUT_0);
+	gpio_init(KEY_OUT_1);
+	gpio_init(KEY_OUT_2);
+	gpio_set_dir(KEY_OUT_0, GPIO_OUT);
+	gpio_set_dir(KEY_OUT_1, GPIO_OUT);
+	gpio_set_dir(KEY_OUT_2, GPIO_OUT);
+	gpio_put(KEY_OUT_0, 1);
+	gpio_put(KEY_OUT_1, 1);
+	gpio_put(KEY_OUT_2, 1);
 
-    while (1)
-    {
-        keypad_task();
-        if (keypad_state.pressed)
-        {
-            keypad_state.pressed = false;
-            printf("%c row: %d col: %d\n", keys[keypad_state.row][keypad_state.col], keypad_state.row, keypad_state.col);
-        }
-    }
+	input_state_swapped = false;
+	input_state = input_state_data[0];
+	input_state_previous = input_state_data[1];
 
-    return 0;
+	while (1)
+	{
+		keypad_task();
+	}
+
+	return 0;
 }
