@@ -31,9 +31,7 @@ pico_enable_stdio_usb(keypad 1)
 target_link_libraries(keypad pico_stdlib)
 
 # Add any user requested libraries
-target_link_libraries(keypad
-        hardware_i2c
-        )
+target_link_libraries(keypad)
 
 pico_add_extra_outputs(keypad)
 
