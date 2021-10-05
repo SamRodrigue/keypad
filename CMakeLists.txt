@@ -19,13 +19,13 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(keypad keypad.c main.c )
+add_executable(keypad main.c )
 
 pico_set_program_name(keypad "keypad")
 pico_set_program_version(keypad "0.1")
 
-pico_enable_stdio_uart(keypad 0)
-pico_enable_stdio_usb(keypad 1)
+pico_enable_stdio_uart(keypad 1)
+pico_enable_stdio_usb(keypad 0)
 
 # Add the standard library to the build
 target_link_libraries(keypad pico_stdlib)
