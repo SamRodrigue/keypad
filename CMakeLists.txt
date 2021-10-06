@@ -28,10 +28,9 @@ pico_enable_stdio_uart(keypad 1)
 pico_enable_stdio_usb(keypad 0)
 
 # Add the standard library to the build
-target_link_libraries(keypad pico_stdlib)
+target_link_libraries(keypad pico_stdlib pico_multicore)
 
 # Add any user requested libraries
 target_link_libraries(keypad)
 
 pico_add_extra_outputs(keypad)
-

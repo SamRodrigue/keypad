@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "pico/stdlib.h"
+#include "pico/multicore.h"
+
 #define SCREEN_SIZE 16
 
 static char const keys[KEYPAD_IN_SIZE][KEYPAD_OUT_SIZE] = {
@@ -34,7 +37,7 @@ void print_keypad()
 		for (uint8_t col = 0; col < KEYPAD_OUT_SIZE; ++col)
 		{
 			putchar(' ');
-			if (keypad_get(row, col))
+			if (keypad_state(row, col))
 				putchar(keys[row][col]);
 			else
 				putchar('-');
@@ -44,11 +47,11 @@ void print_keypad()
 }
 
 // Action to perform on a keypad event
-void key_action(struct keypad_event event)
+void key_action(struct keypad_event const *event)
 {
 	print_keypad();
 
-	switch (event.type)
+	switch (event->type)
 	{
 	case KEY_RELEASE:
 		break;
@@ -56,8 +59,11 @@ void key_action(struct keypad_event event)
 	case KEY_PRESSED:
 		if (++cursor == SCREEN_SIZE)
 			cursor = 0;
-		screen[cursor] = keys[event.row][event.col];
+		screen[cursor] = keys[event->row][event->col];
 		break;
+
+	case UNDEFINED:
+		passert(false, "Undefined event received");
 	}
 
 	for (uint8_t i = 0; i <= cursor; ++i)
@@ -69,15 +75,26 @@ int main()
 {
 	stdio_init_all();
 	keypad_init();
+
 	print_keypad();
 
 	cursor = SCREEN_SIZE - 1;
 	memset(screen, '\0', SCREEN_SIZE);
 
+	multicore_launch_core1(&keypad_main);
+
 	while (1)
 	{
-		keypad_task(&key_action);
+		uint32_t index = multicore_fifo_pop_blocking();
+		struct keypad_event event;
+		keypad_get_event(index, &event);
+		key_action(&event);
 	}
 
 	return 0;
 }
+
+// TODO, shared unordered memory. Pass pointers or index to multicore fifo
+// index = multicore_fifo_pop_blocking(); // Causes core to wait for message.
+
+// if (mutlicore_fif_rvalid()) // Check for missed events

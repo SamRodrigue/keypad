@@ -2,6 +2,8 @@
 #define _KEYPAD_H_
 
 #include "pico/stdlib.h"
+#include "pico/multicore.h"
+
 #include <stdio.h>
 #define passert(check, message) if (!(check)) { printf("%s:%d %s", __FILE__, __LINE__, message); assert(false); }
 
@@ -27,8 +29,8 @@
 #define KEYPAD_MASK_7(_1, ...) KEYPAD_MASK_1(_1) | KEYPAD_MASK_6(__VA_ARGS__)
 #define KEYPAD_MASK_8(_1, ...) KEYPAD_MASK_1(_1) | KEYPAD_MASK_7(__VA_ARGS__)
 #define KEYPAD_MASK(...) (KEYPAD_COUNT_N(__VA_ARGS__, \
-	                                KEYPAD_MASK_8, KEYPAD_MASK_7, KEYPAD_MASK_6, KEYPAD_MASK_5, \
-	                                KEYPAD_MASK_4, KEYPAD_MASK_3, KEYPAD_MASK_2, KEYPAD_MASK_1)(__VA_ARGS__))
+	                                 KEYPAD_MASK_8, KEYPAD_MASK_7, KEYPAD_MASK_6, KEYPAD_MASK_5, \
+	                                 KEYPAD_MASK_4, KEYPAD_MASK_3, KEYPAD_MASK_2, KEYPAD_MASK_1)(__VA_ARGS__))
 
 #define KEYPAD_IN_SIZE KEYPAD_COUNT(KEYPAD_IN)
 #define KEYPAD_OUT_SIZE KEYPAD_COUNT(KEYPAD_OUT)
@@ -36,15 +38,13 @@
 #define KEYPAD_IN_MASK KEYPAD_MASK(KEYPAD_IN)
 #define KEYPAD_OUT_MASK KEYPAD_MASK(KEYPAD_OUT)
 
-static uint32_t const keypad_in[] = { KEYPAD_IN };
-static uint32_t const keypad_out[] = { KEYPAD_OUT };
-
-static uint32_t keypad_input_state[KEYPAD_OUT_SIZE] = { 0 };
+#define KEYPAD_BUFFER_SIZE 8 + 1
 
 enum event_type
 {
 	KEY_RELEASE,
-	KEY_PRESSED
+	KEY_PRESSED,
+	UNDEFINED
 };
 
 struct keypad_event
@@ -54,11 +54,17 @@ struct keypad_event
 	uint8_t row;
 };
 
+static uint32_t const keypad_in[] = { KEYPAD_IN };
+static uint32_t const keypad_out[] = { KEYPAD_OUT };
+
+static uint32_t keypad_input_state[KEYPAD_OUT_SIZE] = { 0 };
+static struct keypad_event keypad_events[KEYPAD_BUFFER_SIZE];
+
 
 #define time_off() sleep_ms(1)
 #define time_on() sleep_ms(1)
 
-void keypad_task(void (*action)(struct keypad_event))
+void keypad_task()
 {
 	for (uint8_t col = 0; col < KEYPAD_OUT_SIZE; ++col)
 	{
@@ -80,12 +86,24 @@ void keypad_task(void (*action)(struct keypad_event))
 					continue;
 
 				keypad_input_state[col] ^= mask;
-				
-				struct keypad_event event = {
-					current_state == 0ul ? KEY_RELEASE : KEY_PRESSED,
-					col, row };
 
-				action(event);
+				// Get next available slot
+				bool fault = true;
+				for (uint32_t i = 0; i < KEYPAD_BUFFER_SIZE; ++i)
+				{
+					if (keypad_events[i].type != UNDEFINED)
+						continue;
+
+					keypad_events[i].type = current_state == 0ul ? KEY_RELEASE : KEY_PRESSED;
+					keypad_events[i].col = col;
+					keypad_events[i].row = row;
+
+					multicore_fifo_push_blocking(i);
+					fault = false;
+					break;
+				}
+
+				passert(!fault, "Buffer size exceeded");
 			}
 		}
 
@@ -94,10 +112,20 @@ void keypad_task(void (*action)(struct keypad_event))
 }
 
 
-bool keypad_get(uint8_t row, uint8_t col)
+bool keypad_state(uint8_t row, uint8_t col)
 {
 	passert(row < KEYPAD_IN_SIZE && col < KEYPAD_OUT_SIZE, "keypad_get out of range");
 	return keypad_input_state[col] & (1ul << keypad_in[row]);
+}
+
+
+void keypad_get_event(uint32_t index, struct keypad_event *event)
+{
+	// TODO fault checking
+	event->type = keypad_events[index].type;
+	event->col = keypad_events[index].col;
+	event->row = keypad_events[index].row;
+	keypad_events[index].type = UNDEFINED;
 }
 
 
@@ -118,8 +146,22 @@ void keypad_init()
 	gpio_init_mask(KEYPAD_IN_MASK | KEYPAD_OUT_MASK);
 	gpio_set_dir_in_masked(KEYPAD_IN_MASK);
 	gpio_set_dir_out_masked(KEYPAD_OUT_MASK);
-   _gpio_set_pull_masked(KEYPAD_IN_MASK);
+	_gpio_set_pull_masked(KEYPAD_IN_MASK);
 	gpio_put_masked(KEYPAD_OUT_MASK, (KEYPAD_LEVEL_ON == 1) ? 0x0ul : ~0x0ul);
+
+	for (uint32_t i = 0; i < KEYPAD_BUFFER_SIZE; i++)
+	{
+		keypad_events[i].type = UNDEFINED;
+	}
+}
+
+// Example
+void keypad_main()
+{
+	while (1)
+	{
+		keypad_task();
+	}
 }
 
 #endif
