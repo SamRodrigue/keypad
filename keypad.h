@@ -77,6 +77,7 @@ void keypad_task()
 		{
 			for (uint8_t row = 0; row < KEYPAD_IN_SIZE; ++row)
 			{
+				// TODO: consider use Interpolator (2.3.1.6) for shift/mask operation
 				uint32_t mask = 1ul << keypad_in[row];
 
 				uint32_t previous_state = keypad_input_state[col] & mask;
@@ -85,6 +86,7 @@ void keypad_task()
 				if (previous_state == current_state)
 					continue;
 
+				// Toggle input status bit
 				keypad_input_state[col] ^= mask;
 
 				// Get next available slot
