@@ -4,28 +4,17 @@
 
 #include "keypad.h"
 #include "display.h"
+#include "painter.h"
 
 #include <stdio.h>
 
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 
-#define SCREEN_SIZE 16
+#define DISPLAY0_ADDR 0x3c
+#define DISPLAY1_ADDR 0x3d
 
-static uint8_t const font[] = {
-	0x7E, 0xA1, 0x91, 0x89, 0x7E, // 0
-	0x80, 0x86, 0xFF, 0x80, 0x80, // 1
-	0xC6, 0xA1, 0x91, 0x91, 0x8E, // 2
-	0x46, 0x81, 0x91, 0x91, 0x6E, // 3
-	0x30, 0x28, 0x26, 0x21, 0xFF, // 4
-	0x4F, 0x89, 0x89, 0x89, 0x71, // 5
-	0x78, 0x96, 0x91, 0x91, 0x60, // 6
-	0x07, 0x01, 0xE1, 0x11, 0x0F, // 7
-	0x6E, 0x91, 0x91, 0x91, 0x6E, // 8
-	0x0E, 0x91, 0x91, 0x51, 0x3E, // 9
-	0x10, 0x10, 0x7E, 0x10, 0x10, // +
-	0x10, 0x10, 0x10, 0x10, 0x10  // -
-};
+#define SCREEN_SIZE 16
 
 static char const keys[KEYPAD_IN_SIZE][KEYPAD_OUT_SIZE] = {
 	'1', '2', '3',
@@ -44,6 +33,8 @@ static char const keys_alt[KEYPAD_IN_SIZE][KEYPAD_OUT_SIZE] = {
 static char screen[SCREEN_SIZE];
 static uint8_t cursor;
 
+static display_t display[2];
+
 
 void print_keypad()
 {
@@ -56,18 +47,17 @@ void print_keypad()
 			if (keypad_state(row, col))
 			{
 				putchar(keys[row][col]);
-				for (uint8_t i = 0; i < 5; ++i)
-					display_buffer.data[DISPLAY_COMS - 1 - (6*col + i)][row] = font[5*(keys[row][col] - '0')+i];
+				painter_text(keys[row][col], 10*col, row, &display[0]);
 			}
 			else
 			{
 				putchar('-');
-				for (uint8_t i = 0; i < 5; ++i)
-					display_buffer.data[DISPLAY_COMS - 1 - (6*col + i)][row] = font[5*11+i];
+				painter_text('-', 10*col, row, &display[0]);
 			}
 		}
 		putchar('\n');
-		display();
+
+		display_draw(&display[0]);
 	}
 }
 
@@ -94,23 +84,30 @@ void key_action(struct keypad_event const *event)
 	for (uint8_t i = 0; i <= cursor; ++i)
 	{
 		putchar(screen[i]);
-		for (uint8_t j = 0; j < 5; ++j)
-			display_buffer.data[DISPLAY_COMS - 1 - (6*i + j)][7] = font[5*(screen[i] - '0')+j];
-			
+		painter_text(screen[i], 7*i, 7, &display[1]);
 	}
+
+	display_draw(&display[1]);
 }
 
 
 int main()
 {
 	stdio_init_all();
-	display_init();
-	keypad_init();
 
-	print_keypad();
+	display[0].address = DISPLAY0_ADDR;
+	display[1].address = DISPLAY1_ADDR;
+
+	for (uint8_t d = 0; d < 2; ++d)
+		display_init(4, 5, &display[d]);
+
+	// painter_init_canvas()
+
+	keypad_init();
 
 	cursor = SCREEN_SIZE - 1;
 	memset(screen, '\0', SCREEN_SIZE);
+	print_keypad();
 
 	multicore_launch_core1(&keypad_main);
 
@@ -120,7 +117,8 @@ int main()
 		struct keypad_event event;
 		keypad_get_event(index, &event);
 		key_action(&event);
-		// TODO: if (mutlicore_fif_rvalid()) // Check for missed events
+		//passert(multicore_fifo_rvalid(), "Message still in fifo"); // Check for missed events
+		//painter_flush();
 	}
 
 	return 0;
