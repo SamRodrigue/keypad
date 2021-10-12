@@ -49,13 +49,25 @@ static uint8_t display_init_sequence[] = {
 // 	0xaf        // display on
 // };
 
+// TODO: Is this needed after a reset
 static uint8_t display_pager[] = {
-	0x00,          // non-continuous/command
-	// set coumn address: start address, end address
+	// non-continuous/command
+	0x00,
+	// set com address: start address, end address
 	0x21, 0x00, DISPLAY_COMS - 1,
 	// set page address: start address, end address
 	0x22, 0x00, DISPLAY_PAGES - 1
 };
+
+typedef struct __attribute__((__packed__)) display_pager {
+	uint8_t req1;
+	uint8_t req2;
+	uint8_t start_com;
+	uint8_t end_com;
+	uint8_t req3;
+	uint8_t start_page;
+	uint8_t end_page;
+} display_pager_t;
 
 typedef struct __attribute__((__packed__)) display_buffer {
 	uint8_t header;
@@ -69,9 +81,54 @@ typedef struct display {
 } display_t;
 
 
-inline void display_draw(display_t const *display)
+static display_pager_t display_make_pager(uint8_t start_com, uint8_t start_page, uint8_t end_com, uint8_t end_page)
 {
-	i2c_write_blocking(display->port, display->address, (uint8_t*)&display->buffer, sizeof(display->buffer), false);
+	display_pager_t pager = { 0x00, 0x21, start_com, end_com, 0x22, start_page, end_page };
+	return pager;
+}
+
+
+static void display_set_pager(display_pager_t *pager, display_t const *display)
+{
+	i2c_write_blocking(display->port, display->address, (uint8_t*)pager, sizeof(display_pager_t), false);
+}
+
+
+void display_resize(uint8_t start_com, uint8_t start_page, uint8_t end_com, uint8_t end_page, display_t const *display)
+{
+	display_pager_t pager = display_make_pager(start_com, start_page, end_com, end_page);
+	display_set_pager(&pager, display);
+}
+
+
+// void display_draw(uint8_t start_com, uint8_t start_page, uint8_t end_com, uint8_t end_page, display_t const *display)
+// {
+// 	uint8_t display_sub_buffer[DISPLAY_BUFFER + 1];
+// 	uint8_t width = end_com - start_com;
+// 	uint8_t height = end_page - start_page;
+// 	size_t size = width * height + 1;
+
+// 	display_sub_buffer[0] = 0x40;
+
+// 	size_t index = 0;
+// 	for (uint8_t com = start_com; com < width; ++com)
+// 		for (uint8_t page = 0; page < height; ++page)
+// 			display_sub_buffer[++index] = display->buffer.data[com][page];
+
+// 	i2c_write_blocking(display->port, display->address, display_sub_buffer, size, false);
+// }
+
+
+void display_draw(display_t const *display)
+{
+	printf("draw %d\n", display->address);
+	i2c_write_blocking(display->port, display->address, (uint8_t*)&display->buffer, DISPLAY_BUFFER + 1, false);
+}
+
+
+inline void display_clear(display_t *display)
+{
+	memset(display->buffer.data, 0, DISPLAY_BUFFER);
 }
 
 

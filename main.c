@@ -14,13 +14,13 @@
 #define DISPLAY0_ADDR 0x3c
 #define DISPLAY1_ADDR 0x3d
 
-#define SCREEN_SIZE 16
+#define SCREEN_SIZE 36
 
 static char const keys[KEYPAD_IN_SIZE][KEYPAD_OUT_SIZE] = {
 	'1', '2', '3',
 	'4', '5', '6',
 	'7', '8', '9',
-	':', '0', ':'
+	'+', '0', '-'
 };
 
 static char const keys_alt[KEYPAD_IN_SIZE][KEYPAD_OUT_SIZE] = {
@@ -33,7 +33,7 @@ static char const keys_alt[KEYPAD_IN_SIZE][KEYPAD_OUT_SIZE] = {
 static char screen[SCREEN_SIZE];
 static uint8_t cursor;
 
-static display_t display[2];
+static display_t displays[2];
 
 
 void print_keypad()
@@ -47,17 +47,16 @@ void print_keypad()
 			if (keypad_state(row, col))
 			{
 				putchar(keys[row][col]);
-				painter_text(keys[row][col], 10*col, row, &display[0]);
+				painter_text(keys[row][col], 10*col, 10*row);
 			}
 			else
 			{
 				putchar('-');
-				painter_text('-', 10*col, row, &display[0]);
+				painter_text('-', 10*col, 10*row);
 			}
 		}
 		putchar('\n');
 
-		display_draw(&display[0]);
 	}
 }
 
@@ -84,10 +83,8 @@ void key_action(struct keypad_event const *event)
 	for (uint8_t i = 0; i <= cursor; ++i)
 	{
 		putchar(screen[i]);
-		painter_text(screen[i], 7*i, 7, &display[1]);
+		painter_text(screen[i], 7*i, 55);
 	}
-
-	display_draw(&display[1]);
 }
 
 
@@ -95,19 +92,23 @@ int main()
 {
 	stdio_init_all();
 
-	display[0].address = DISPLAY0_ADDR;
-	display[1].address = DISPLAY1_ADDR;
+	displays[0].address = DISPLAY0_ADDR;
+	displays[1].address = DISPLAY1_ADDR;
 
 	for (uint8_t d = 0; d < 2; ++d)
-		display_init(4, 5, &display[d]);
+		display_init(4, 5, &displays[d]);
 
-	// painter_init_canvas()
+	painter_init(displays, 2);
 
 	keypad_init();
 
 	cursor = SCREEN_SIZE - 1;
 	memset(screen, '\0', SCREEN_SIZE);
 	print_keypad();
+	for (uint8_t i = 0; i < 10; ++i)
+		painter_large_text('0' + i, 32 + 16 * i, 6);
+	//painter_large_text('+', 128 + 16 * 5, 0);
+	painter_flush();
 
 	multicore_launch_core1(&keypad_main);
 
@@ -118,7 +119,7 @@ int main()
 		keypad_get_event(index, &event);
 		key_action(&event);
 		//passert(multicore_fifo_rvalid(), "Message still in fifo"); // Check for missed events
-		//painter_flush();
+		painter_flush();
 	}
 
 	return 0;
