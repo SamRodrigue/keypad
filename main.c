@@ -4,6 +4,7 @@
 
 #include "keypad.h"
 #include "display.h"
+#include "field.h"
 #include "painter.h"
 
 #include <stdio.h>
@@ -34,6 +35,7 @@ static char screen[SCREEN_SIZE];
 static uint8_t cursor;
 
 static display_t displays[2];
+static field_t field[2];
 
 
 void print_keypad()
@@ -71,6 +73,10 @@ void key_action(struct keypad_event const *event)
 		break;
 
 	case KEY_PRESSED:
+		field_putchar(keys[event->row][event->col], &field[0]);
+		painter_field(&field[0]);
+		field_putchar(keys[event->row][event->col], &field[1]);
+		painter_field(&field[1]);
 		if (++cursor == SCREEN_SIZE)
 			cursor = 0;
 		screen[cursor] = keys[event->row][event->col];
@@ -78,12 +84,6 @@ void key_action(struct keypad_event const *event)
 
 	case UNDEFINED:
 		passert(false, "Undefined event received");
-	}
-
-	for (uint8_t i = 0; i <= cursor; ++i)
-	{
-		putchar(screen[i]);
-		painter_text(screen[i], 7*i, 55);
 	}
 }
 
@@ -100,15 +100,10 @@ int main()
 
 	painter_init(displays, 2);
 
-	keypad_init();
+	field_init(32, 6, 14, 20, &field[0]);
+	field_init(32, 38, 14, 14, &field[1]);
 
-	cursor = SCREEN_SIZE - 1;
-	memset(screen, '\0', SCREEN_SIZE);
-	print_keypad();
-	for (uint8_t i = 0; i < 10; ++i)
-		painter_large_text('0' + i, 32 + 16 * i, 6);
-	//painter_large_text('+', 128 + 16 * 5, 0);
-	painter_flush();
+	keypad_init();
 
 	multicore_launch_core1(&keypad_main);
 

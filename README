@@ -1,0 +1,2 @@
+Matrix keyboard library with I2C display support.
+Currently being developed for a 3x4 keyboard matrix with two 128x64 displays.
